@@ -3,3 +3,4 @@ Pretrained/
 *.pyc
 __pycache__/
 .ipynb_checkpoints/
+Old/
