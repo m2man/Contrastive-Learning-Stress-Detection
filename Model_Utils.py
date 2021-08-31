@@ -9,7 +9,31 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import random
 from torch.autograd import Variable
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
+import torch.nn.functional as F
 
+# An ordinary implementation of Swish function
+class Swish(nn.Module):
+    def forward(self, x):
+        return x * torch.sigmoid(x)
+
+# A memory-efficient implementation of Swish function
+class SwishImplementation(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, i):
+        result = i * torch.sigmoid(i)
+        ctx.save_for_backward(i)
+        return result
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        i = ctx.saved_tensors[0]
+        sigmoid_i = torch.sigmoid(i)
+        return grad_output * (sigmoid_i * (1 + i * (1 - sigmoid_i)))
+
+class MemoryEfficientSwish(nn.Module):
+    def forward(self, x):
+        return SwishImplementation.apply(x)
+    
 def init_weights(m):
     if isinstance(m, nn.Linear):
         torch.nn.init.xavier_uniform_(m.weight)
@@ -58,17 +82,18 @@ class HeadProjection_Model(nn.Module):
         self.output_size = output_size
         
         self.hd1 = nn.Linear(self.input_size, self.input_size)
-        self.bn1 = nn.BatchNorm1d(num_features=self.input_size)
-        self.rl1 = nn.ReLU()
-        self.do = nn.Dropout(0.2)
+        #self.bn1 = nn.BatchNorm1d(num_features=self.input_size)
+        self.rl1 = nn.ReLU() #MemoryEfficientSwish() # nn.ReLU()
+        #self.do = nn.Dropout(0.2)
         self.hd2 = nn.Linear(self.input_size, self.output_size)
         
     def forward(self, feat):
         x = self.hd1(feat)
-        x = self.bn1(x)
+        #x = self.bn1(x)
         x = self.rl1(x)
-        x = self.do(x)
+        #x = self.do(x)
         x = self.hd2(x)
+        x = F.normalize(x, p=2, dim=1)
         return x    
     
 class Embedding_Model(nn.Module):
@@ -80,24 +105,31 @@ class Embedding_Model(nn.Module):
         
         modules = [] 
         for idx, size in enumerate(self.emb_size):
-            if idx == 0:
-                modules.append(nn.Linear(self.input_size, self.emb_size[idx]))
+            if idx != len(self.emb_size) - 1: # Not the last layer
+                if idx == 0:
+                    modules.append(nn.Linear(self.input_size, self.emb_size[idx]))
+                else:
+                    modules.append(nn.Linear(self.emb_size[idx-1], self.emb_size[idx]))
+                modules.append(nn.BatchNorm1d(num_features=self.emb_size[idx]))
+                modules.append(nn.ReLU())
+                modules.append(nn.Dropout(self.do))   
             else:
-                modules.append(nn.Linear(self.emb_size[idx-1], self.emb_size[idx]))
-            modules.append(nn.BatchNorm1d(num_features=self.emb_size[idx]))
-            modules.append(nn.ReLU())
-            modules.append(nn.Dropout(self.do))   
-       
+                # This is the last layer
+                if idx == 0:
+                    modules.append(nn.Linear(self.input_size, self.emb_size[idx]))
+                else:
+                    modules.append(nn.Linear(self.emb_size[idx-1], self.emb_size[idx]))
         # Add for Res connect
         #modules.append(nn.Linear(self.emb_size[-1], self.input_size))
         #modules.append(nn.BatchNorm1d(num_features=self.input_size))
         #modules.append(nn.ReLU())
         #modules.append(nn.Dropout(self.do))    
         self.emb = nn.Sequential(*modules)
-        self.emb.apply(init_weights)
+        # self.emb.apply(init_weights)
         
     def forward(self, feat):
         x = self.emb(feat) #+ feat
+        #x = F.normalize(x, p=2, dim=1)
         return x
     
 class Sequence_Model(nn.Module):
@@ -162,3 +194,32 @@ class Sequence_Model(nn.Module):
             #final_hidden_state = torch.cat((h_1, h_2), 1)  # Concatenate both states
         
         return final_hidden_state#, out_unpacked_combine # (batch, hidden_size), (batch, max seq len, hidden_size)
+
+
+class Model_Combine(nn.Module):
+    def __init__(self, input_size, dropout=0.4, emb_size=[64], projection_size=64, cls_size=None):
+        # cls_size is None or a list
+        super(Model_Combine, self).__init__()
+        self.encoder = Embedding_Model(input_size=input_size, dropout=dropout, emb_size=emb_size)
+        self.projection_size = projection_size
+        self.cls_size = cls_size
+        if self.projection_size is not None:
+            self.projection = HeadProjection_Model(input_size=emb_size[-1], output_size=projection_size)
+        else:
+            self.projection = nn.Identity()
+        if self.cls_size is not None:
+            self.cls = Classify_Model(emb_size[-1], dropout=dropout, hidden_size=cls_size)
+        else:
+            self.cls = None
+            
+    def forward(self, feat):
+        encode = self.encoder(feat)
+        if self.projection_size is not None:
+            x = F.normalize(self.projection(encode), p=2, dim=1)
+        else:
+            x = self.projection(encode)
+        if self.cls is not None:
+            out = self.cls(encode)
+        else:
+            out = None
+        return x, encode, out

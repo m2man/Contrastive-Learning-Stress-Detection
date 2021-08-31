@@ -181,6 +181,41 @@ class EmbConDataset(Dataset):
         self.start_0 = 0
         self.start_1 = 0
     
+    def sampling_validate(self, seed=1509, portion=1):
+        print('Sampling all pairs for validate set ...')
+        index_0 = self.index_0.copy()
+        index_1 = self.index_1.copy()
+        random.Random(seed).shuffle(index_0)
+        random.Random(seed).shuffle(index_1)
+        
+        pairs_1 = []
+        for val in range(len(index_1)):
+            anchor = index_1[val]
+            list_match = index_1[val:]
+            p = list(itertools.product([anchor], list_match))
+            pairs_1 += p 
+            #if (val + 1) >= len(index_1):
+            #    break
+        take_1 = int(portion * len(pairs_1))
+        pairs_1 = pairs_1[:take_1]
+            
+        pairs_0 = []
+        for val in range(len(index_0)):
+            anchor = index_0[val]
+            list_match = index_0[val:]
+            p = list(itertools.product([anchor], list_match))
+            pairs_0 += p 
+            #if (val + 1) >= len(index_0):
+            #    break
+        if portion != 1:
+            pairs_0 = pairs_0[:take_1]
+
+        pairs_all = pairs_0 + pairs_1
+        random.Random(seed).shuffle(pairs_all)
+        print(f'Number of Pairs {len(pairs_all)}')
+        self.samples = pairs_all    
+        print('DONE Sampling all pairs for validate set ...')
+    
     def calibrate_classes(self, seed=1509, reverse=False):
         # Concate sample 1 to have same length of sample 0
         self.index_0_sample_all = self.index_0.copy()
@@ -198,11 +233,11 @@ class EmbConDataset(Dataset):
             self.index_1_sample_all = self.index_1_sample_all[:len(self.index_0_sample_all)]
         
     def __getitem__(self, i):
-        samples = self.samples
-        sample_1 = self.df.iloc[samples[i][0],:-2].to_numpy(dtype=np.float64) # not include subject_id and label
-        sample_2 = self.df.iloc[samples[i][1],:-2].to_numpy(dtype=np.float64)
-        label_1 = self.df['label'][samples[i][0]]
-        label_2 = self.df['label'][samples[i][1]]
+        samples = self.samples[i]
+        sample_1 = self.df.iloc[samples[0],:-2].to_numpy(dtype=np.float64) # not include subject_id and label
+        sample_2 = self.df.iloc[samples[1],:-2].to_numpy(dtype=np.float64)
+        label_1 = self.df['label'][samples[0]]
+        label_2 = self.df['label'][samples[1]]
         '''
         if label_1 == label_2: # can be binary 0, 1 --> here just make more general
             if self.df['subject_id'][samples[i][0]] == self.df['subject_id'][samples[i][1]]:
@@ -213,11 +248,12 @@ class EmbConDataset(Dataset):
             #label = (1 - self.is_validate) * random.random() / 10
             label = 0
         '''
+        assert label_1 == label_2
         if label_1 == 0: # This time surely that label_1 == label_2 already
             label = 0
         else:
             label = 1
-        return sample_1, sample_2, label
+        return sample_1, sample_2, label, samples[0], samples[1]
     
     def summary(self):
         result = []
@@ -332,16 +368,20 @@ class EmbConDataset(Dataset):
         
         # Cross subject
         if cross:
-            for idx, subj in enumerate(self.list_subject):
+            list_subject_copy = self.list_subject.copy()
+            random.Random(seed).shuffle(list_subject_copy)
+            for idx, subj in enumerate(list_subject_copy):
                 idx_0_current_subj = idx_subj[subj][0]
                 idx_1_current_subj = idx_subj[subj][1]
-                for next_idx in range(idx+1, len(self.list_subject)):
-                    next_subj = self.list_subject[next_idx]
-                    idx_0_next_subj = idx_subj[next_subj][0]
-                    idx_1_next_subj = idx_subj[next_subj][1]
-                    pairs_0 = list(itertools.product(idx_0_current_subj, idx_0_next_subj))
-                    pairs_1 = list(itertools.product(idx_1_current_subj, idx_1_next_subj))
-                    pairs_internal = pairs_internal + pairs_0 + pairs_1
+                next_idx = idx+1
+                if next_idx >= len(list_subject_copy):
+                    next_idx = 0
+                next_subj = list_subject_copy[next_idx]
+                idx_0_next_subj = idx_subj[next_subj][0]
+                idx_1_next_subj = idx_subj[next_subj][1]
+                pairs_0 = list(itertools.product(idx_0_current_subj, idx_0_next_subj))
+                pairs_1 = list(itertools.product(idx_1_current_subj, idx_1_next_subj))
+                pairs_internal = pairs_internal + pairs_0 + pairs_1
                 
         random.Random(seed).shuffle(pairs_internal)
         print(f'Number of Internal Pairs {len(pairs_internal)}')
@@ -385,11 +425,13 @@ class EmbConDataset(Dataset):
         return len(self.samples)
     
 def generate_batch_3(batch):
-    samples_1, samples_2, labels = zip(*batch)
+    samples_1, samples_2, labels, idx_0,  idx_1 = zip(*batch)
     ft1 = torch.tensor([sample for sample in samples_1]).squeeze(1).float()#.to(device)
     ft2 = torch.tensor([sample for sample in samples_2]).squeeze(1).float()#.to(device)
     labels = torch.tensor(labels).float()#.to(device)
-    return ft1, ft2, labels
+    idx_0 = torch.tensor(idx_0)
+    idx_1 = torch.tensor(idx_1)
+    return ft1, ft2, labels, idx_0, idx_1
 
 # Dataloader Class
 def make_EmbConDataLoader(dataset, **args):
