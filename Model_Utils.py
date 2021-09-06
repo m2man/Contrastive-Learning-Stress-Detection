@@ -44,35 +44,34 @@ class Classify_Model(nn.Module):
         super(Classify_Model, self).__init__()
         self.do = dropout
         self.input_size = input_size
-        self.emb_size = hidden_size
-        
-#         modules = [] 
-#         for idx, size in enumerate(self.emb_size):
-#             if idx == 0:
-#                 modules.append(nn.Linear(self.input_size, self.emb_size[idx]))
-#             else:
-#                 modules.append(nn.Linear(self.emb_size[idx-1], self.emb_size[idx]))
-#             modules.append(nn.BatchNorm1d(num_features=self.emb_size[idx]))
-#             modules.append(nn.ReLU())
-#             modules.append(nn.Dropout(self.do))   
-       
-          # Add for Res connect
-#         modules.append(nn.Linear(self.emb_size[-1], self.input_size))
-#         modules.append(nn.BatchNorm1d(num_features=self.input_size))
-#         modules.append(nn.ReLU())
-#         modules.append(nn.Dropout(self.do))    
-#         self.emb = nn.Sequential(*modules)
+        if hidden_size[0] == -1:   
+            self.emb = nn.Identity() 
+            self.emb_size = [input_size]
+        else:
+            self.emb_size = hidden_size
+            modules = [] 
+            for idx, size in enumerate(self.emb_size):
+                if idx == 0:
+                    modules.append(nn.Linear(self.input_size, self.emb_size[idx]))
+                else:
+                    modules.append(nn.Linear(self.emb_size[idx-1], self.emb_size[idx]))
+                modules.append(nn.BatchNorm1d(num_features=self.emb_size[idx]))
+                modules.append(nn.ReLU())
+                modules.append(nn.Dropout(self.do))   
+            self.emb = nn.Sequential(*modules)
         
         self.cls = nn.Sequential(
             # --- #
-            nn.Linear(self.input_size, 1),
+            nn.Linear(self.emb_size[-1], 1),
+            #nn.Linear(self.input_size, 1),
             #nn.Sigmoid()
         )
         
         self.cls.apply(init_weights)
 
     def forward(self, feat):
-        x = self.cls(feat)
+        x = self.emb(feat)
+        x = self.cls(x)
         return x
 
 class HeadProjection_Model(nn.Module):

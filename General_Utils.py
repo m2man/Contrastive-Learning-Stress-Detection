@@ -7,7 +7,7 @@ from sklearn.metrics import accuracy_score, f1_score, balanced_accuracy_score
 from torch.autograd import Variable
 import joblib
 sigmoid_function = nn.Sigmoid()
-torch.autograd.set_detect_anomaly(True)
+#torch.autograd.set_detect_anomaly(False)
 from Dataset_Utils import make_EmbConDataLoader
 import math
 
@@ -695,7 +695,7 @@ def validate_epoch_emb_combine(model, dataloader, loss_func_con, loss_func_optio
             #features_pro = torch.cat([samples_1_pro.unsqueeze(1), samples_2_pro.unsqueeze(1)], dim=1)
             ##features_emb = torch.cat([samples_1_emb.unsqueeze(1), samples_2_emb.unsqueeze(1)], dim=1)
             
-            # loss_emb_con = loss_func_con(features_emb, labels)
+            ##loss_emb_con = loss_func_con(features_emb, labels)
             #loss_pro_con = loss_func_con(features_pro, labels)
             
             # EuclidLoss

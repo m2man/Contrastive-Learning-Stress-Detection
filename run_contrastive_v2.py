@@ -13,11 +13,12 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import joblib
 from scipy import stats
 from torchlars import LARS
+#torch.autograd.set_detect_anomaly(True)
 
 # 14, 6, 17, 3, 2, 13, 9, 10, 15, 8, 7, 11, 4, 5, 16
 SUBJECT_ID_TEST = [6, 17, 3, 2, 13, 9, 10, 15, 8, 7, 11, 4, 5]
 SUBJECT_ID_TEST = ['S'+str(x) for x in SUBJECT_ID_TEST]
-SUBJECT_ID_TEST = 'S9'
+SUBJECT_ID_TEST = 'S17'
 
 # # 'GM1', 'EK1', 'NM1', 'RY1', 'KSG1', 'AD1', 'NM3', 'SJ1', 'BK1', 'RY2', 'GM2', 'MT1', 'NM2'
 # SUBJECT_ID_TEST = 'AD1' # SJ1
@@ -32,13 +33,13 @@ INPUT_FT = 60
 EMBEDDING_HIDDEN = [256, 512]
 PROJECTION_OUT = None #128 # None or int
 CLASSIFY_HIDDEN = [256] # [64] # list or None
-DROPOUT = 0.2
+DROPOUT = 0.5
 
 MAX_EPOCH = 50
 LOOK_BEFORE = 3
 INTERNAL_SAMPLE = 200
 
-MODEL_NAME = 'SCL_CLS_512_LARS_Adam'
+MODEL_NAME = 'Euclid_DeepCLS_DO_512_LARS_Adam'
 SAVE_MODEL_DIR = 'Output'
 NAME_DATASET = 'WESAD'
 
@@ -74,7 +75,7 @@ def train_model(subject_id_test='S10', pretrained_model=''):
     list_id = list(set(data_train_val.subject_id))
     list_id.sort()
     subject_id_validate = random.Random(1509+int(subject_id_test[1:])+88).choices(list_id,k=1)[0]
-    subject_id_validate = 'S8'
+    #subject_id_validate = 'S8'
     data_train = data_train_val[data_train_val.subject_id != subject_id_validate]
     data_validate = data_train_val[data_train_val.subject_id == subject_id_validate]
     ft_names = data_train.columns.tolist()
@@ -152,9 +153,9 @@ def train_model(subject_id_test='S10', pretrained_model=''):
     
     ##### DECLARE MODEL / LOSS FUNC #####
     #con_func = TripletLoss(margin=MARGIN)
-    #con_func = ContrastiveLoss_EuclidSimilarity(margin=MARGIN, max_violation=True)
-    cosine_func = None #ContrastiveLoss_CosineSimilarity(margin=0.2, max_violation=False)
-    con_func = SupConLoss(temperature=0.07, contrast_mode='all', base_temperature=0.07)
+    cosine_func = None #ContrastiveLoss_CosineSimilarity(margin=0.2, max_violation=True)
+    con_func = ContrastiveLoss_EuclidSimilarity(margin=MARGIN, max_violation=True)
+    #con_func = SupConLoss(temperature=0.07, contrast_mode='all', base_temperature=0.07)
     cls_func = nn.BCEWithLogitsLoss().to(device)
     
     if CLASSIFY_HIDDEN is None:
@@ -165,8 +166,12 @@ def train_model(subject_id_test='S10', pretrained_model=''):
     Model = Model.to(device)
 
     if len(pretrained_model) > 0:
-        modelCheckpoint = torch.load(pretrained_model)
-        Con_Mod.load_state_dict(modelCheckpoint['model_state_dict'])
+        try:
+            modelCheckpoint = torch.load(pretrained_model)
+            Model.load_state_dict(modelCheckpoint['model_state_dict'])
+            print('Pretrained Model Loaded')
+        except:
+            print('Cannot find pretrained path --> From Scratch')
     
     params = list(filter(lambda p: p.requires_grad, Model.parameters()))
     
@@ -256,16 +261,16 @@ def train_model(subject_id_test='S10', pretrained_model=''):
     Model.load_state_dict(modelCheckpoint['model_state_dict'])
     Model.eval()
         
-    print('Run on Test set in final')
-    test_info, loss_test_dict = validate_epoch_emb_combine(Model, test_dataloader, con_func, loss_func_optional=cosine_func, loss_func_cls=cls_func)
-    logging(test_info+'\n', f'{SAVE_MODEL_DIR}/{NAME_DATASET}/Log/Training_{MODEL_NAME}_{subject_id_test}.txt', True)
+    print('Run on Test set in final --> LOAD Best Model')
+    #test_info, loss_test_dict = validate_epoch_emb_combine(Model, test_dataloader, con_func, loss_func_optional=cosine_func, loss_func_cls=cls_func)
+    #logging(test_info+'\n', f'{SAVE_MODEL_DIR}/{NAME_DATASET}/Log/Training_{MODEL_NAME}_{subject_id_test}.txt', True)
     
     if cls_func is not None:
         acc_cls_test, bacc_cls_test, f1_cls_test, dis_cls_info, t1, t2, t3 = classify_emb_df_combine(Model, test_dataloader_embed)
         cls_info = f'[CLASSIFY TEST {subject_id_test} ONLY]\n'
         cls_info = cls_info + dis_cls_info + '\n'
         cls_info += f'Acc: {round(acc_cls_test, 4)}\nBAcc: {round(bacc_cls_test, 4)}\nF1: {round(f1_cls_test, 4)}'
-        logging(test_info+'\n', f'{SAVE_MODEL_DIR}/{NAME_DATASET}/Log/Training_{MODEL_NAME}_{subject_id_test}.txt', True)
+        logging(cls_info+'\n', f'{SAVE_MODEL_DIR}/{NAME_DATASET}/Log/Training_{MODEL_NAME}_{subject_id_test}.txt', True)
     
 def embeding_feature(train_model_path='', scaler_path=''):
     subject_id_test = scaler_path.split('/')[-1]
@@ -322,10 +327,10 @@ def main():
     train_model(subject_id_test=SUBJECT_ID_TEST, 
                 pretrained_model='')
     
-    embeding_feature(
-           train_model_path=f"{SAVE_MODEL_DIR}/{NAME_DATASET}/Model/{MODEL_NAME}_{SUBJECT_ID_TEST}.pth.tar",    
-           scaler_path=f'{SAVE_MODEL_DIR}/{NAME_DATASET}/Model/StandardScaler_{SUBJECT_ID_TEST}.joblib'
-    )
+    #embeding_feature(
+    #       train_model_path=f"{SAVE_MODEL_DIR}/{NAME_DATASET}/Model/{MODEL_NAME}_{SUBJECT_ID_TEST}.pth.tar",    
+    #       scaler_path=f'{SAVE_MODEL_DIR}/{NAME_DATASET}/Model/StandardScaler_{SUBJECT_ID_TEST}.joblib'
+    #)
         
     #for idx,_ in enumerate(SUBJECT_ID_TEST):
     #    subject_id_test = SUBJECT_ID_TEST[idx]
